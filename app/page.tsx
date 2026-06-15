@@ -1,32 +1,69 @@
 'use client'
-import { useState } from 'react'
-
-const habitos_demo = [
-  { id: 1, nombre: 'Beber 2L de agua', emoji: '💧', completado: false },
-  { id: 2, nombre: 'Leer 20 minutos', emoji: '📚', completado: false },
-  { id: 3, nombre: 'Hacer ejercicio', emoji: '🏃', completado: false },
-  { id: 4, nombre: 'Dormir antes de las 23h', emoji: '😴', completado: false },
-]
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { supabase } from './lib/supabase'
 
 export default function Home() {
-  const [habitos, setHabitos] = useState(habitos_demo)
+  const router = useRouter()
+  const [habitos, setHabitos] = useState<any[]>([])
   const [analisis, setAnalisis] = useState('')
   const [cargando, setCargando] = useState(false)
   const [nuevoHabito, setNuevoHabito] = useState('')
   const [mostrarInput, setMostrarInput] = useState(false)
+  const [cargandoApp, setCargandoApp] = useState(true)
+  const [userId, setUserId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        router.push('/login')
+        return
+      }
+      setUserId(session.user.id)
+
+      const { data } = await supabase.from('habitos').select('*').eq('user_id', session.user.id)
+
+      if (data && data.length > 0) {
+        setHabitos(data)
+      } else {
+        const defaults = [
+          { nombre: 'Beber 2L de agua', emoji: '💧', completado: false, user_id: session.user.id },
+          { nombre: 'Leer 20 minutos', emoji: '📚', completado: false, user_id: session.user.id },
+          { nombre: 'Hacer ejercicio', emoji: '🏃', completado: false, user_id: session.user.id },
+          { nombre: 'Dormir antes de las 23h', emoji: '😴', completado: false, user_id: session.user.id },
+        ]
+        const { data: inserted } = await supabase.from('habitos').insert(defaults).select()
+        if (inserted) setHabitos(inserted)
+      }
+      setCargandoApp(false)
+    }
+    init()
+  }, [])
 
   const completados = habitos.filter(h => h.completado).length
-  const porcentaje = Math.round((completados / habitos.length) * 100)
+  const porcentaje = habitos.length > 0 ? Math.round((completados / habitos.length) * 100) : 0
 
-  const toggleHabito = (id: number) => {
-    setHabitos(habitos.map(h => h.id === id ? { ...h, completado: !h.completado } : h))
+  const toggleHabito = async (id: string) => {
+    const habito = habitos.find(h => h.id === id)
+    const nuevoEstado = !habito.completado
+    setHabitos(habitos.map(h => h.id === id ? { ...h, completado: nuevoEstado } : h))
+    await supabase.from('habitos').update({ completado: nuevoEstado }).eq('id', id)
   }
 
-  const añadirHabito = () => {
-    if (!nuevoHabito.trim()) return
-    setHabitos([...habitos, { id: Date.now(), nombre: nuevoHabito, emoji: '⭐', completado: false }])
+  const añadirHabito = async () => {
+    if (!nuevoHabito.trim() || !userId) return
+    const { data } = await supabase.from('habitos').insert({
+      nombre: nuevoHabito, emoji: '⭐', completado: false, user_id: userId
+    }).select()
+    if (data) setHabitos([...habitos, ...data])
     setNuevoHabito('')
     setMostrarInput(false)
+  }
+
+  const cerrarSesion = async () => {
+    await supabase.auth.signOut()
+    router.push('/login')
   }
 
   const analizarConIA = async () => {
@@ -46,6 +83,17 @@ export default function Home() {
     setCargando(false)
   }
 
+  if (cargandoApp) {
+    return (
+      <div style={{
+        minHeight: '100vh', background: 'linear-gradient(135deg, #0f0c29, #302b63, #24243e)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white'
+      }}>
+        Cargando...
+      </div>
+    )
+  }
+
   return (
     <div style={{
       minHeight: '100vh',
@@ -59,13 +107,18 @@ export default function Home() {
       <div style={{ width: '100%', maxWidth: '420px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
         {/* Header */}
-        <div style={{ textAlign: 'center', marginBottom: '8px' }}>
+        <div style={{ textAlign: 'center', marginBottom: '8px', position: 'relative' }}>
           <h1 style={{
             fontSize: '36px', fontWeight: '800',
             background: 'linear-gradient(90deg, #a78bfa, #818cf8)',
             WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0
           }}>StreakMind</h1>
           <p style={{ color: '#94a3b8', marginTop: '4px', fontSize: '14px' }}>Tu coach de hábitos con IA</p>
+          <button onClick={cerrarSesion} style={{
+            position: 'absolute', top: 0, right: 0, background: 'transparent',
+            border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px',
+            padding: '6px 12px', color: '#94a3b8', fontSize: '12px', cursor: 'pointer'
+          }}>Salir</button>
         </div>
 
         {/* Racha */}
